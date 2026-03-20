@@ -6,36 +6,44 @@ import { Pencil } from 'lucide-react';
 import EmojiSelect from './habitComponents/EmojiSelect';
 import './index.css';
 import './HabitDetails.css';
+import Calendar from "./habitComponents/calendar";
 import {handleSaveHabit, deleteHabit} from "./firestore";
 
 function NameDescription({ habit, updateHabitField }) {
-    const [emoji, setEmoji] = useState(habit.emoji || "📝");
-    const colorInputRef = useRef(null);
-
     return (
         <div id="habit-desc">
             <div id="habit-header">
-                <div 
-                    
-                    className="habit-circle"
-                    style={{ backgroundColor: habit.color ?? "#b9b7b7" }}
-                    onClick={() => colorInputRef.current?.click()}
-                >
-                    <div id="habit-emoji" onClick={(e) => e.stopPropagation() } >
-                        <EmojiSelect
-                            value={habit.emoji}
-                            onChange={(e) => updateHabitField("emoji", e)}
-                        />
+                <div id="color-emoji-picker">
+                    <div 
+                        className="habit-circle"
+                        style={{ backgroundColor: habit.color ?? "#b9b7b7" }}
+                    >
+                        <div id="habit-emoji" onClick={(e) => e.stopPropagation() } >
+                            <EmojiSelect
+                                value={habit.emoji}
+                                onChange={(e) => updateHabitField("emoji", e)}
+                            />
+                        </div>
+                    </div>
+
+                    <div id="color-picker-wrapper">
+                        <select 
+                            name="color-picker" 
+                            id="color-picker" 
+                            value={habit.color ?? "#b9b7b7"}
+                            onChange={ (e) => {updateHabitField("color", e.target.value)} }
+                        >
+                                <option value="#b9b7b7">Default</option>
+                                <option value="#f8aaaa">Red</option>
+                                <option value="#aaffaa">Green</option>
+                                <option value="#aaaaff">Blue</option>
+                                <option value="#ffffaa">Yellow</option>
+                                <option value="#ffb6c1">Pink</option>
+                                <option value="#ffa500">Orange</option>
+                                <option value="#800080">Purple</option>
+                        </select>
                     </div>
                 </div>
-
-                <input
-                    ref={colorInputRef}
-                    type="color"
-                    value={habit.color ?? "#b9b7b7"}
-                    onChange={(e) => updateHabitField("color", e.target.value)}
-                    style={{ display: "none" }}
-                />
 
                 <input
                     type="text"
@@ -115,9 +123,145 @@ function HabitType({ habit, updateHabitField }) {
 }
 
 function GoalInfo({ habit, updateGoalField }) {
+    const daysSelected = habit.goal?.daysSelected ?? [];
+
+    const setDaysSelected = (updater) => {
+        const next = typeof updater === "function" ? updater(daysSelected) : updater;
+        updateGoalField("daysSelected", next);
+    }
+
+    const setNumOfDays = (val) => updateGoalField("numOfDays", val);
+
+    useEffect(() => {
+        updateGoalField("daysSelected", []);
+        updateGoalField("numOfDays", 0);
+    }, [habit.goal?.taskDays]);
+
+    function CheckBoxDay({ name, daysSelected, setDaysSelected }) {
+        // Start checked by default
+        const checked = daysSelected.includes(name);
+
+        const handleToggle = () => {
+            if (!checked) {
+                // Logic to ADD to the array (assuming setDaysSelected is an array setter)
+                setDaysSelected(prev => [...prev, name]);
+            } else {
+                // Logic to REMOVE from the array
+                setDaysSelected(prev => prev.filter(day => day !== name));
+            }
+        };
+
+        return (
+            <div style={{ fontSize: "14px" }}>
+                <input 
+                    type="checkbox"
+                    id={name}
+                    name={name}
+                    checked={checked}
+                    // FIXED: Wrapped in an arrow function so it only runs on click
+                    onChange={() => handleToggle()} 
+                />
+                <label htmlFor={name}>{name}</label>
+            </div>
+        );
+    }
+
+    function SelectTaskDays({ selectedTaskDay, daysSelected, setDaysSelected, setNumOfDays }) {
+        const isError = daysSelected.length === 0;
+        const [numOfDaysInput, setNumOfDaysInput] = useState(habit.goal?.numOfDays ?? "");
+
+        return(
+            <div>
+                {selectedTaskDay === "specific_month_days" && (
+                    <div id="task-days-select" 
+                        style={{
+                            marginTop: "30px",
+                            backgroundColor: "transparent",
+                            width: "100%",
+                            height: "450px"
+                         }}
+                    >
+                        <Calendar daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                    </div>
+                )}
+                {selectedTaskDay === "specific_days" && (
+                    <div >
+                        <p id="days-error" 
+                        style={{color: "red", fontSize: "14px", visibility: isError ? "visible" : "hidden"}}>
+                            Error: Please select at least one day.
+                        </p>
+                        <label htmlFor='specific-days' id="specific-days" style={{fontSize: "16px"}} >
+                            Choose Day(s) to accomplish the habit: </label>
+                        <div id="select-day">
+                            <CheckBoxDay name="Monday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                            <CheckBoxDay name="Tuesday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                            <CheckBoxDay name="Wednesday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                            <CheckBoxDay name="Thursday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                            <CheckBoxDay name="Friday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                            <CheckBoxDay name="Saturday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                            <CheckBoxDay name="Sunday" daysSelected={daysSelected} setDaysSelected={setDaysSelected}/>
+                        </div>
+                    </div>
+                )}
+                {selectedTaskDay === "number_days" && (
+                    <div className="specific-days">
+                        <label htmlFor='number-days' style={{fontSize: "16px"}}>
+                            Enter the number of days per week you want to accomplish this habit: {" "}
+                        </label>
+                        <input 
+                            type="number" 
+                            id="number-days"
+                            value={numOfDaysInput} 
+                            onChange={(e) => setNumOfDaysInput(e.target.value)}
+                            onBlur={() => { // input min max is not working for some reason
+                                const val = Math.min(7, Math.max(1, Number(numOfDaysInput) || 1));
+                                setNumOfDaysInput(val);
+                                updateGoalField("numOfDays", val);
+                            }}
+                        />
+                    </div>
+                )}
+                {selectedTaskDay === "specific_month_number" && (
+                    <div className="specific-days">
+                        <label htmlFor='number-month-days' style={{fontSize: "16px"}}>
+                            Enter the number of days per month you want to accomplish this habit: {" "}
+                        </label>
+                        <input 
+                            type="number" 
+                            id="number-month-days" 
+                            value={numOfDaysInput}
+                            onChange={(e) => setNumOfDaysInput(e.target.value)}
+                            onBlur={() => {
+                                const val = Math.min(31, Math.max(1, Number(numOfDaysInput) || 1));
+                                setNumOfDaysInput(val);
+                                updateGoalField("numOfDays", val);
+                            }} 
+                        />
+                    </div>
+                )}
+            </div>
+        );
+    } 
+
     return (
-        <div id="goal-info">
-            <div id="goal-period">
+        <div 
+            id="goal-info"
+            style={{
+                minHeight: 
+                    habit.goal?.taskDays === "everyday" 
+                    ? "195px"
+                    : habit.goal?.taskDays === "specific_days"
+                    ? "425px"
+                    : habit.goal?.taskDays === "number_days"
+                    ? "250px"
+                    : habit.goal?.taskDays === "specific_month_days"
+                    ? "680px"
+                    : habit.goal?.taskDays === "specific_month_number"
+                    ? "250px"
+                    : "195px"
+            }}
+        >
+            <div id="goal-period" >
                 <label>Goal Period:</label>
                 <select
                     name="period"
@@ -179,6 +323,13 @@ function GoalInfo({ habit, updateGoalField }) {
                     <option value="specific_month_days">Specific days of the month</option>
                     <option value="specific_month_number">Number of days per month</option>
                 </select>
+
+                <SelectTaskDays 
+                    selectedTaskDay={habit.goal?.taskDays}
+                    daysSelected={daysSelected}
+                    setDaysSelected={setDaysSelected}
+                    setNumOfDays={setNumOfDays}
+                />
             </div>
         </div>
     );
