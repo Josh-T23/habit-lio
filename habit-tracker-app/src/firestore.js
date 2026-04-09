@@ -24,20 +24,48 @@ export const searchUsers = async (searchString) => {
   try {
     const q = query(
       collection(db, "users"),
-      where("username", ">=", searchString.toLowerCase()),
-      where("username", "<=", searchString.toLowerCase() + "\uf8ff"),
+      where("userInfo.username", ">=", searchString),
+      where("userInfo.username", "<=", searchString + "\uf8ff"),
       limit(10),
     );
 
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map((doc) => ({
-      uid: doc.id,
-      ...doc.data(),
-    }));
+    return querySnapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        uid: doc.id,
+        ...data,
+        username: data.userInfo?.username || ""
+      };
+    });
   } catch (error) {
     console.error("Error searching users:", error);
     return [];
   }
+};
+
+export const sendFriendRequest = async (currentUserId, targetUserId) => {
+  const friendshipId = [currentUserId, targetUserId].sort().join("_");
+  const friendshipRef = doc(db, "friendships", friendshipId);
+
+  await setDoc(friendshipRef, {
+    requesterId: currentUserId,
+    receiverId: targetUserId,
+    status: "pending",
+    createdAt: serverTimestamp(),
+  }, { merge: true });
+};
+
+export const acceptFriendRequest = async (friendshipId) => {
+  const friendshipRef = doc(db, "friendships", friendshipId);
+  await updateDoc(friendshipRef, {
+    status: "accepted"
+  });
+};
+
+export const removeFriendship = async (friendshipId) => {
+  const friendshipRef = doc(db, "friendships", friendshipId);
+  await deleteDoc(friendshipRef);
 };
 
 export const createUserProfile = async (

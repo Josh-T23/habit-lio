@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useState, useContext} from "react";
 import {
   UserPlus,
   Search,
@@ -8,9 +8,16 @@ import {
 } from "lucide-react";
 import "./index.css";
 import "./FriendsPage.css";
-import { searchUsers } from "./firestore";
+import { searchUsers,
+  getUserProfile,
+  sendFriendRequest,
+  acceptFriendRequest,
+  removeFriendship} from "./firestore";
+import { AuthContext } from "./AuthContext";
+import { onSnapshot, collection, query, where, or, and } from "firebase/firestore";
+import { db } from "./firebase";
 
-
+/*
 // -- Using fake information for now -----------------------------
 const friends = [
   { uid: 1, name: "Alex Rivera", username: "alexrivera" },
@@ -45,6 +52,8 @@ const ALL_USERS = [
   { uid: 14, name: "Ethan Brooks", username: "ethanbrooks" },
   { uid: 15, name: "Mei Tanaka", username: "meitanaka" },
 ];
+*/
+
 
 // -----------------------------------------------------------------
 
@@ -62,14 +71,14 @@ const FriendCard = ({ friend, onClick }) => (
       <div id="friend-picture"></div>
       <div>
         {/* <div className="friend-card-name">{friend.name}</div> */}
-        <div className="friend-card-username">@{friend.username}</div>
+        <div className="friend-card-username">@{friend.userInfo.username || friend.username}</div>
       </div>
     </div>
   </button>
 );
 
 // -- Friends List/Search -------------------------------------------------------------
-const FriendsList = ({ onFriendClick, onRequestsClick, requestCount }) => {
+const FriendsList = ({ onFriendClick, onRequestsClick, requestCount, friendList }) => {
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const hasInput = search.trim().length > 0;
@@ -142,7 +151,7 @@ const FriendsList = ({ onFriendClick, onRequestsClick, requestCount }) => {
       </div>
 
       <div id="friends-grid">
-        {friends.map((friend) => (
+        {friendList.map((friend) => (
           <FriendCard
             key={friend.uid}
             friend={friend}
@@ -232,16 +241,14 @@ const UserProfileModal = ({
       <div id="profile-modal-picture"></div>
 
       {/* <div id="profile-modal-name">{user.name}</div> */}
-      <div id="profile-modal-username">@{user.username}</div>
+      <div id="profile-modal-username">@{user.userInfo?.username || user.username}</div>
 
       <div id="profile-modal-actions">
         {isFriend ? ( // Clicking on a friended user
           <div style={{ display: "flex", gap: "10px", flexDirection: "row" }}>
             <button
               className="profile-btn profile-btn-remove"
-              onClick={() => {
-                onRemoveFriend(user.uid);
-              }}
+              onClick={onRemoveFriend}
             >
               <UserX /> Remove Friend
             </button>
@@ -255,18 +262,14 @@ const UserProfileModal = ({
           <div style={{ display: "flex", flexDirection: "row", gap: "10px" }}>
             <button
               className="profile-btn profile-btn-add"
-              onClick={() => {
-                onAccept(user.uid);
-              }}
+              onClick={onAccept}
             >
               <UserPlus /> Accept Request
             </button>
 
             <button
               className="profile-btn profile-btn-remove"
-              onClick={() => {
-                onDecline(user.uid);
-              }}
+              onClick={onDecline}
             >
               <UserX /> Decline Request
             </button>
@@ -276,9 +279,7 @@ const UserProfileModal = ({
           <div>
             <button
               className="profile-btn profile-btn-add"
-              onClick={() => {
-                sendRequest(user.uid);
-              }}
+              onClick={sendRequest}
             >
               <UserPlus />
               Add Friend
@@ -294,13 +295,61 @@ const UserProfileModal = ({
 
 function FriendsPage() {
   const [selectedUser, setSelectedUser] = useState(null);
+  const user = useContext(AuthContext);
   const [showRequests, setShowRequests] = useState(false);
-  const [requests, setRequests] = useState(INITIAL_REQUESTS);
-  const [friendList, setFriendsList] = useState(friends);
+
+  const [friendList, setFriendList] = useState([]);
+  const [requests, setRequests] = useState([]);
 
   // Needs set up with firestore
   //const handleAccept  = id => setRequests(r => r.filter(req => req.id !== id));
   //const handleDecline = id => setRequests(r => r.filter(req => req.id !== id));
+  useEffect(() => {
+    if (!user) return;
+
+    // 1. Listen for Accepted Friends
+    const friendsQuery = query(
+        collection(db, "friendships"),
+        and(
+            where("status", "==", "accepted"),
+            or(
+                where("requesterId", "==", user.uid),
+                where("receiverId", "==", user.uid)
+            )
+        )
+    );
+
+    const unsubFriends = onSnapshot(friendsQuery, async (snapshot) => {
+      const friendPromises = snapshot.docs.map(async (d) => {
+        const data = d.data();
+        const friendId = data.requesterId === user.uid ? data.receiverId : data.requesterId;
+        const profile = await getUserProfile(friendId);
+        if (!profile) return null;
+        return { friendshipId: d.id, ...profile };
+      });
+      const results = await Promise.all(friendPromises);
+      setFriendList(results.filter(p => p !== null));
+    });
+
+    // 2. Listen for Incoming Pending Requests
+    const requestsQuery = query(
+        collection(db, "friendships"),
+        and(
+          where("receiverId", "==", user.uid),
+          where("status", "==", "pending")
+        )
+    );
+
+    const unsubRequests = onSnapshot(requestsQuery, async (snapshot) => {
+      const requestPromises = snapshot.docs.map(async (d) => {
+        const profile = await getUserProfile(d.data().requesterId);
+        return { friendshipId: d.id, ...profile };
+      });
+      setRequests(await Promise.all(requestPromises));
+    });
+
+    return () => { unsubFriends(); unsubRequests(); };
+  }, [user]);
 
   const isFriend = (uid) => friendList.some((f) => f.uid === uid);
   const hasRequest = (uid) => requests.some((r) => r.uid === uid);
@@ -310,7 +359,8 @@ function FriendsPage() {
       <FriendsList
         onFriendClick={setSelectedUser}
         onRequestsClick={() => setShowRequests(true)}
-        requestCount={INITIAL_REQUESTS.length}
+        requestCount={requests.length}
+        friendList={friendList}
       />
 
       {selectedUser && (
@@ -319,10 +369,19 @@ function FriendsPage() {
           isFriend={isFriend(selectedUser.uid)}
           hasRequest={hasRequest(selectedUser.uid)}
           onClose={() => setSelectedUser(null)}
-          //sendRequest={handleSendRequest}
-          //onAdd={handleAddFriend}
-          //onDecline={handleDeclineFriend}
-          //onRemove={handleRemoveFriend}
+          sendRequest={() => sendFriendRequest(user.uid, selectedUser.uid)}
+          onAccept={() => {
+            const req = requests.find(r => r.uid === selectedUser.uid);
+            if (req) acceptFriendRequest(req.friendshipId);
+          }}
+          onDecline={() => {
+            const req = requests.find(r => r.uid === selectedUser.uid);
+            if (req) removeFriendship(req.friendshipId);
+          }}
+          onRemoveFriend={() => {
+            const friend = friendList.find(f => f.uid === selectedUser.uid);
+            if (friend) removeFriendship(friend.friendshipId);
+          }}
         />
       )}
 
@@ -331,8 +390,14 @@ function FriendsPage() {
           requests={requests}
           onClose={() => setShowRequests(false)}
           onUserClick={setSelectedUser}
-          //onAccept={handleAccept}
-          //onDecline={handleDecline}
+          onAccept={(uid) => {
+            const req = requests.find(r => r.uid === uid);
+            acceptFriendRequest(req.friendshipId);
+          }}
+          onDecline={(uid) => {
+            const req = requests.find(r => r.uid === uid);
+            removeFriendship(req.friendshipId);
+          }}
         />
       )}
     </div>
